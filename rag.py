@@ -15,12 +15,35 @@ path = r"Playbooks for remediation of identified CVEs for Azure Function Apps 2.
 def read_file(path):
 
     doc = Document(path)
+
     paragraphs = []
+    buffer = ""
 
     for p in doc.paragraphs:
+
         text = p.text.strip()
-        if text:
-            paragraphs.append(text)
+
+        if not text:
+            continue
+
+        # If line is only a list number like "1." or "2."
+        if re.match(r"^\d+\.$", text):
+            buffer += text + " "
+            continue
+
+        # If previous buffer contains a number prefix
+        if buffer:
+            buffer += text
+            paragraphs.append(buffer.strip())
+            buffer = ""
+            continue
+
+        # Normal paragraph
+        paragraphs.append(text)
+
+    # Flush remaining buffer
+    if buffer:
+        paragraphs.append(buffer.strip())
 
     return "\n".join(paragraphs)
 
@@ -30,8 +53,9 @@ def read_file(path):
 # -----------------------------
 def split_by_cve(document):
 
-    pattern = r"(CVE-\d{4}-\d+)"
-    splits = re.split(pattern, document)
+    pattern = r"\n(CVE-\d{4}-\d+)"
+   # splits = re.split(pattern, document)
+    splits = re.split(pattern, "\n" + document)
 
     cve_sections = []
 
@@ -53,20 +77,27 @@ def split_by_cve(document):
 # -----------------------------
 def split_sections(text):
 
-    section_pattern = r"(Scope|Technical Implementation Steps|Manual Remediation Process|Remediation Steps|Automation|Change Management|Verification|References)"
-
-    parts = re.split(section_pattern, text)
+  #  section_pattern = r"(Scope|Technical Implementation Steps|Manual Remediation Process|Remediation Steps|Automation|Change Management.*|Verification|Reference.*)"
+    section_pattern = r"(?m)^(Scope|Technical Implementation Steps|Manual Remediation Process|Remediation Steps|Automation|Change Management and Documentation|Verification|Reference|References)$"
+    matches = list(re.finditer(section_pattern, text))
 
     sections = []
 
-    for i in range(1, len(parts), 2):
+    for i in range(len(matches)):
 
-        section_name = parts[i]
-        section_text = parts[i+1]
+        start = matches[i].end()
+
+        if i + 1 < len(matches):
+            end = matches[i + 1].start()
+        else:
+            end = len(text)
+
+        section_name = matches[i].group()
+        section_text = text[start:end].strip()
 
         sections.append({
             "section": section_name,
-            "text": section_text.strip()
+            "text": section_text
         })
 
     return sections

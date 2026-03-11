@@ -70,7 +70,7 @@ def render_progress(current_step, state):
 
         4: f"CVEs : {len(state.get('remediation_data',{}))}",
 
-        5: f"Generated Summaries : {len(state.get('summarized_steps',{}))}",
+        5: f"Generated Fix's : {len(state.get('summarized_steps',{}))}",
 
         6: f"Validated : {len(state.get('validation_result',{}))}",
 
@@ -293,6 +293,7 @@ else:
             st.code(result.get("summary"), language="text")
  
             st.write("🛠 Remediation:")
+          #  st.markdown(result.get("remediation"))
             st.code(result.get("remediation"), language="bash")
  
             st.write("📚 Source:")

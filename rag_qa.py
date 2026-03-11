@@ -27,13 +27,13 @@ vector_db = Chroma(
 )
 
 # Query
-query = "How to remediate CVE-2018-6829"
+query = "How to remediate CVE-2016-1585"
 
 # Retriever with CVE + Section filter
 docs = vector_db.get(
     where={
         "$and":[
-            {"cve_id":"CVE-2018-6829"},
+            {"cve_id":"CVE-2016-1585"},
             {
                 "$or":[
                     {"section":"Technical Implementation Steps"},

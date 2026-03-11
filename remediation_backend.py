@@ -6,6 +6,10 @@ from langgraph.graph import StateGraph
 from ubuntu_scraper import ubuntu_cve
 from debian_scraper import debian_cve
 import os
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from sentence_transformers import CrossEncoder
+
 # ==========================================================
 # STATE MODEL
 # ==========================================================
@@ -28,6 +32,74 @@ class RemediationState(TypedDict):
 # ==========================================================
 # AGENTS
 # ==========================================================
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-large-en"
+)
+
+reranker = CrossEncoder("BAAI/bge-reranker-large")
+
+vector_db = Chroma(
+    collection_name="cve_remediation",
+    embedding_function=embeddings,
+    persist_directory="./cve_vector_db"
+)
+
+def retrieve_from_rag(cve_id):
+
+    query = f"How to remediate {cve_id}"
+    print("query",query)
+
+    docs = vector_db.get(
+        where={
+            "$and":[
+                {"cve_id":cve_id},
+                {
+                    "$or":[
+                        {"section":"Technical Implementation Steps"},
+                        {"section":"Remediation Procedures"}
+                    ]
+                }
+            ]
+        }
+    )
+
+    # No documents found
+    if not docs or len(docs["documents"]) == 0:
+        return None
+
+    # -----------------------------
+    # RERANK DOCUMENTS
+    # -----------------------------
+    pairs = [[query, doc] for doc in docs["documents"]]
+    scores = reranker.predict(pairs)
+
+    scored_docs = list(zip(docs["documents"], docs["metadatas"], scores))
+
+    ranked_docs = sorted(
+        scored_docs,
+        key=lambda x: x[2],
+        reverse=True
+    )
+
+    # -----------------------------
+    # TAKE TOP 3
+    # -----------------------------
+    top_docs = ranked_docs[:3]
+
+    remediation_steps = []
+
+    for text, meta, score in top_docs:
+        remediation_steps.append(text)
+
+    remediation_text = "\n\n".join(remediation_steps)
+    print("remediation steps for cve id",cve_id,remediation_text)
+
+    return {
+        "summary": f"Remediation retrieved from internal playbook for {cve_id}",
+        "remediation": remediation_text,
+        "sources": "Internal RAG Playbook"
+    }
 
 # 1️⃣ INGESTION
 def ingestion_agent(state: RemediationState):
@@ -123,8 +195,6 @@ def os_detection_agent(state: RemediationState):
     state["current_step"] = 3
 
     return state
-
-# 4️⃣ PARALLEL AGENTS (Simulated Sequential Here)
 def remediation_agents(state: RemediationState):
 
     results = {}
@@ -132,7 +202,8 @@ def remediation_agents(state: RemediationState):
         "windows_agent_ran": False,
         "linux_agent_ran": False,
         "ubuntu_agent_ran": False,
-        "debian_agent_ran": False
+        "debian_agent_ran": False,
+        "rag_hits": 0
     }
 
     os_data = state.get("os_distribution", {})
@@ -148,10 +219,24 @@ def remediation_agents(state: RemediationState):
         agent_execution_summary["windows_agent_ran"] = True
 
         for v in windows_list:
+
             cve = v.get("Name")
             if not cve:
                 continue
 
+            # -------------------------
+            # 1️⃣ Try RAG first
+            # -------------------------
+            rag_result = retrieve_from_rag(cve)
+
+            if rag_result:
+                results[cve] = rag_result
+                agent_execution_summary["rag_hits"] += 1
+                continue
+
+            # -------------------------
+            # 2️⃣ Windows fallback
+            # -------------------------
             results[cve] = {
                 "summary": f"CVE: {cve}\nPlatform: Windows\nStatus: Vulnerable",
                 "remediation": f"Apply latest Microsoft patch for {cve}",
@@ -162,6 +247,7 @@ def remediation_agents(state: RemediationState):
     # LINUX AGENT
     # ==========================================
     if len(ubuntu_list) > 0 or len(debian_list) > 0:
+
         agent_execution_summary["linux_agent_ran"] = True
 
         # ---------- UBUNTU AGENT ----------
@@ -169,13 +255,28 @@ def remediation_agents(state: RemediationState):
             agent_execution_summary["ubuntu_agent_ran"] = True
 
             for v in ubuntu_list:
+
                 cve = v.get("Name")
                 if not cve:
                     continue
 
+                # -------------------------
+                # 1️⃣ Try RAG first
+                # -------------------------
+                rag_result = retrieve_from_rag(cve)
+
+                if rag_result:
+                    results[cve] = rag_result
+                    agent_execution_summary["rag_hits"] += 1
+                    continue
+
+                # -------------------------
+                # 2️⃣ Ubuntu scraping fallback
+                # -------------------------
                 try:
                     result = ubuntu_cve(cve)
                     results[cve] = result
+
                 except Exception as e:
                     results[cve] = {
                         "summary": f"Ubuntu remediation failed: {str(e)}",
@@ -188,13 +289,28 @@ def remediation_agents(state: RemediationState):
             agent_execution_summary["debian_agent_ran"] = True
 
             for v in debian_list:
+
                 cve = v.get("Name")
                 if not cve:
                     continue
 
+                # -------------------------
+                # 1️⃣ Try RAG first
+                # -------------------------
+                rag_result = retrieve_from_rag(cve)
+
+                if rag_result:
+                    results[cve] = rag_result
+                    agent_execution_summary["rag_hits"] += 1
+                    continue
+
+                # -------------------------
+                # 2️⃣ Debian scraping fallback
+                # -------------------------
                 try:
                     result = debian_cve(cve)
                     results[cve] = result
+
                 except Exception as e:
                     results[cve] = {
                         "summary": f"Debian remediation failed: {str(e)}",
@@ -202,10 +318,17 @@ def remediation_agents(state: RemediationState):
                         "sources": "Debian Security"
                     }
 
+    # ==========================================
+    # UPDATE STATE
+    # ==========================================
+
     state["remediation_data"] = results
     state["agent_execution_summary"] = agent_execution_summary
 
-    state["logs"].append("Parallel remediation agents executed hierarchically")
+    state["logs"].append(
+        f"Remediation agents executed (RAG hits: {agent_execution_summary['rag_hits']})"
+    )
+
     state["current_step"] = 4
 
     return state
