@@ -1,5 +1,9 @@
 streamlit
 langchain
-chromadb
+langchain-community
+langchain-chroma
+langchain-text-splitters
 sentence-transformers
+chromadb
 python-docx
+beautifulsoup4
