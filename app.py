@@ -46,13 +46,13 @@ def render_progress(current_step, state):
 
     step_names = [
         "Ingestion",
-        "Classifier",
+        "Classification Engine",
         "Distribution Analyzer",
         "Fix Analyzer",
         "Summarization",
-        "Pre-Remediation Check",
-        "Auto Remediation",
-        "Execution Logs"
+        "Checks",
+        "Auto Remediation & Validation",
+        "Metrics & Reporting"
     ]
 
     # -----------------------------
@@ -235,7 +235,7 @@ with st.expander("Ingestion Details", expanded=True):
 # =========================================================
 # 2️⃣ CLASSIFIER AGENT
 # =========================================================
-st.markdown("## 2️⃣ Classifier Agent")
+st.markdown("## 2️⃣ Classification Engine Agent")
  
 with st.expander("Classification Summary", expanded=True):
     st.write("Severity Distribution:")
@@ -303,7 +303,7 @@ else:
 # =========================================================
 # 6️⃣ VALIDATION
 # =========================================================
-st.markdown("## 6️⃣ Pre-Remediation Check Agent (SOP)")
+st.markdown("## 6️⃣ Checks Agent")
  
 with st.expander("Validation Results", expanded=True):
     st.json(state.get("validation_result", {}))
@@ -312,7 +312,7 @@ with st.expander("Validation Results", expanded=True):
 # =========================================================
 # 7️⃣ EXECUTION
 # =========================================================
-st.markdown("## 7️⃣ Auto Remediation Execution Agent")
+st.markdown("## 7️⃣ Auto Remediation & Validation Agent")
  
 with st.expander("Execution Status", expanded=True):
     st.json(state.get("execution_result", {}))
@@ -321,7 +321,7 @@ with st.expander("Execution Status", expanded=True):
 # =========================================================
 # 8️⃣ FINAL STATUS
 # =========================================================
-st.markdown("## 8️⃣ Final Execution Logs")
+st.markdown("## 8️⃣ Metrics & Reporting Agent")
  
 # -------------------------------------------------
 # MOVE TO NEXT STEP AFTER UI RENDER
