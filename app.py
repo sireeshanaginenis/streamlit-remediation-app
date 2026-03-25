@@ -50,11 +50,7 @@ def render_progress(current_step, state):
         "Distribution Analyzer",
         "Fix Analyzer",
         "Summarization",
-<<<<<<< HEAD
         "Pre-Remediation Checks",
-=======
-        "Checks",
->>>>>>> 30f13e6a7dce36f57a331e291133eeedc7ebcbee
         "Auto Remediation & Validation",
         "Metrics & Reporting"
     ]
@@ -239,11 +235,6 @@ with st.expander("Ingestion Details", expanded=True):
 # =========================================================
 # 2️⃣ CLASSIFIER AGENT
 # =========================================================
-<<<<<<< HEAD
-=======
-st.markdown("## 2️⃣ Classification Engine Agent")
- 
->>>>>>> 30f13e6a7dce36f57a331e291133eeedc7ebcbee
 with st.expander("Classification Summary", expanded=True):
     st.write("Severity Distribution:")
     st.json(state.get("classified", {}))
@@ -372,9 +363,5 @@ if os.path.exists(FILE_PATH) and st.session_state.get("auto_remediate_clicked", 
     # Move to next step AFTER UI rendered
     if step < 8:
         time.sleep(1)
-<<<<<<< HEAD
         st.session_state.pipeline_state["current_step"] = step + 1
         st.rerun()
-=======
-        st.rerun()
->>>>>>> 30f13e6a7dce36f57a331e291133eeedc7ebcbee
