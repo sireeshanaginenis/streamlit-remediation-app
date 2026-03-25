@@ -1,0 +1,51 @@
+{
+  "CVE-2022-3219": {
+    "category": "simple",
+    "fix": "if (ptr != NULL) { free(ptr); }",
+    "description": "Use-after-free vulnerability in ABC module",
+    "severity": 6.8,
+    "internet_available": "yes"
+  },
+  "CVE-2016-1585": {
+    "category": "simple",
+    "fix": "Added null pointer check",
+    "description": "Null pointer dereference",
+    "severity": 5.0,
+    "internet_available": "yes"
+  },
+  "CVE-2025-0167": {
+    "category": "simple",
+    "fix": "Added null pointer check",
+    "description": "Null pointer dereference",
+    "severity": 5.0,
+    "internet_available": "yes"
+  },
+  "CVE-2025-1153": {
+    "category": "medium",
+    "fix": "Added null pointer check",
+    "description": "Null pointer dereference",
+    "severity": 5.0,
+    "internet_available": "yes"
+  },
+  "CVE-2024-45337": {
+    "category": "complex",
+    "fix": "Added null pointer check",
+    "description": "Null pointer dereference",
+    "severity": 5.0,
+    "internet_available": "yes"
+  },
+  "CVE-2023-32571": {
+    "category": "medium",
+    "fix": "Added null pointer check",
+    "description": "Null pointer dereference",
+    "severity": 5.0,
+    "internet_available": "yes"
+  },
+  "CVE-2022-23535": {
+    "category": "simple",
+    "fix": "Added null pointer check",
+    "description": "Null pointer dereference",
+    "severity": 5.0,
+    "internet_available": "yes"
+  }
+}

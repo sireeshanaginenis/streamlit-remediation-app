@@ -9,7 +9,7 @@ import os
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from sentence_transformers import CrossEncoder
-
+import json
 # ==========================================================
 # STATE MODEL
 # ==========================================================
@@ -123,26 +123,68 @@ def ingestion_agent(state: RemediationState):
 
 
 # 2️⃣ CLASSIFIER
+def normalize_cve(cve):
+    return str(cve).strip().upper().replace("_", "-")
+
+
 def classifier_agent(state: RemediationState):
-    simple = medium = complex_v = 0
 
-    for v in state["vulnerabilities"]:
-        score = float(v.get("CVSS", 5))
+    if not state.get("vulnerabilities"):
+        state["logs"].append("⚠️ No vulnerabilities found for classification")
+        return state
 
-        if score < 5:
+    json_path = os.path.join(os.getcwd(), "cve_classification.json")
+
+    if not os.path.exists(json_path):
+        state["logs"].append("❌ Classification JSON not found")
+        state["classified"] = {"simple": 0, "medium": 0, "complex": 0}
+        return state
+
+    with open(json_path, "r") as f:
+        cve_map = json.load(f)
+
+    # ✅ Normalize JSON keys
+    normalized_map = {
+        normalize_cve(k): v.get("category", "complex").lower()
+        for k, v in cve_map.items()
+    }
+
+    simple = 0
+    medium = 0
+    complex = 0
+
+    for v in state.get("vulnerabilities", []):
+
+        cve_id = normalize_cve(v.get("Name", ""))
+
+        if not cve_id:
+            continue
+
+        category = normalized_map.get(cve_id)
+
+        if not category:
+            state["logs"].append(f"⚠️ Missing in JSON → forcing complex: {cve_id}")
+            category = "complex"
+
+        if category == "simple":
             simple += 1
-        elif score < 8:
+        elif category == "medium":
             medium += 1
-        else:
-            complex_v += 1
+        elif category == "complex":
+            complex += 1
+
+        v["classification"] = category
 
     state["classified"] = {
         "simple": simple,
         "medium": medium,
-        "complex": complex_v
+        "complex": complex
     }
 
-    state["logs"].append("Classification completed")
+    state["logs"].append(
+        f"✅ Classified: simple={simple}, medium={medium}, complex={complex}"
+    )
+
     state["current_step"] = 2
     return state
 
@@ -193,8 +235,8 @@ def os_detection_agent(state: RemediationState):
 
     state["logs"].append("OS detection completed")
     state["current_step"] = 3
-
     return state
+
 def remediation_agents(state: RemediationState):
 
     results = {}
