@@ -9,3 +9,4 @@ chromadb
 python-docx
 beautifulsoup4
 openpyxl
+protobuf==3.20.3
