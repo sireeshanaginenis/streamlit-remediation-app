@@ -10,6 +10,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from sentence_transformers import CrossEncoder
 import json
+from io import BytesIO
 # ==========================================================
 # STATE MODEL
 # ==========================================================
@@ -27,6 +28,7 @@ class RemediationState(TypedDict):
     execution_result: Dict[str, Any]
     logs: List[str]
     current_step: int
+    reporting_metrics: Dict[str, Any]
 
 
 # ==========================================================
@@ -440,11 +442,688 @@ def execution_agent(state: RemediationState):
     return state
 
 
-# 8️⃣ LOGGING
+# ==========================================================
+# 8️⃣ METRICS & REPORTING
+# ==========================================================
+
+def generate_reporting_metrics(state: RemediationState):
+
+    vulnerabilities = state.get("vulnerabilities", [])
+    classified = state.get("classified", {})
+    os_data = state.get("os_distribution", {})
+    remediation_data = state.get("remediation_data", {})
+    summarized_steps = state.get("summarized_steps", {})
+    validation_result = state.get("validation_result", {})
+    execution_result = state.get("execution_result", {})
+    agent_summary = state.get("agent_execution_summary", {})
+
+    # ------------------------------------------------------
+    # BASIC COUNTS
+    # ------------------------------------------------------
+
+    total_cves = len(vulnerabilities)
+
+    classified_count = sum(classified.values()) if classified else 0
+
+    remediation_count = len(remediation_data)
+
+    summarized_count = len(summarized_steps)
+
+    validated_count = len(validation_result)
+
+    executed_count = len(execution_result)
+
+    # ------------------------------------------------------
+    # VALIDATION METRICS
+    # ------------------------------------------------------
+
+    validation_pass = sum(
+        1
+        for value in validation_result.values()
+        if str(value).upper() == "PASS"
+    )
+
+    validation_review = sum(
+        1
+        for value in validation_result.values()
+        if str(value).upper() == "REVIEW"
+    )
+
+    # ------------------------------------------------------
+    # EXECUTION METRICS
+    # ------------------------------------------------------
+
+    execution_success = sum(
+        1
+        for value in execution_result.values()
+        if "success" in str(value).lower()
+    )
+
+    execution_failed = executed_count - execution_success
+
+    # ------------------------------------------------------
+    # RAG METRICS
+    # ------------------------------------------------------
+
+    rag_hits = agent_summary.get("rag_hits", 0)
+
+    rag_coverage = (
+        (rag_hits / remediation_count) * 100
+        if remediation_count > 0
+        else 0
+    )
+
+    # ------------------------------------------------------
+    # REMEDIATION COVERAGE
+    # ------------------------------------------------------
+
+    remediation_coverage = (
+        (remediation_count / total_cves) * 100
+        if total_cves > 0
+        else 0
+    )
+
+    validation_rate = (
+        (validation_pass / validated_count) * 100
+        if validated_count > 0
+        else 0
+    )
+
+    execution_rate = (
+        (execution_success / executed_count) * 100
+        if executed_count > 0
+        else 0
+    )
+
+    # ------------------------------------------------------
+    # REMEDIATION SOURCE DISTRIBUTION
+    # ------------------------------------------------------
+
+    source_distribution = {
+        "Internal RAG": 0,
+        "Microsoft Security": 0,
+        "Ubuntu Security": 0,
+        "Debian Security": 0
+    }
+
+    for cve, data in remediation_data.items():
+
+        source = str(data.get("sources", "")).lower()
+
+        if "rag" in source or "internal" in source:
+            source_distribution["Internal RAG"] += 1
+
+        elif "microsoft" in source:
+            source_distribution["Microsoft Security"] += 1
+
+        elif "ubuntu" in source:
+            source_distribution["Ubuntu Security"] += 1
+
+        elif "debian" in source:
+            source_distribution["Debian Security"] += 1
+
+    # ------------------------------------------------------
+    # PIPELINE FUNNEL
+    # ------------------------------------------------------
+
+    pipeline_funnel = {
+        "Ingested": total_cves,
+        "Classified": classified_count,
+        "Remediation Found": remediation_count,
+        "Validated": validated_count,
+        "Executed": executed_count
+    }
+
+    # ------------------------------------------------------
+    # AGENT EXECUTION
+    # ------------------------------------------------------
+
+    agent_execution = {
+        "Windows Agent": int(
+            agent_summary.get("windows_agent_ran", False)
+        ),
+        "Linux Agent": int(
+            agent_summary.get("linux_agent_ran", False)
+        ),
+        "Ubuntu Agent": int(
+            agent_summary.get("ubuntu_agent_ran", False)
+        ),
+        "Debian Agent": int(
+            agent_summary.get("debian_agent_ran", False)
+        ),
+        "RAG Retrieval": rag_hits
+    }
+
+    # ------------------------------------------------------
+    # OS DISTRIBUTION
+    # ------------------------------------------------------
+
+    os_distribution = {
+        "Windows": os_data.get("windows_count", 0),
+        "Ubuntu": os_data.get(
+            "flavour_counts", {}
+        ).get("Ubuntu", 0),
+        "Debian": os_data.get(
+            "flavour_counts", {}
+        ).get("Debian", 0)
+    }
+
+    # ------------------------------------------------------
+    # FINAL REPORT
+    # ------------------------------------------------------
+
+    report = {
+
+        "kpis": {
+            "total_cves": total_cves,
+            "classified": classified_count,
+            "remediation_found": remediation_count,
+            "remediation_coverage": round(
+                remediation_coverage, 1
+            ),
+            "validation_pass": validation_pass,
+            "validation_rate": round(
+                validation_rate, 1
+            ),
+            "execution_success": execution_success,
+            "execution_rate": round(
+                execution_rate, 1
+            ),
+            "rag_hits": rag_hits,
+            "rag_coverage": round(
+                rag_coverage, 1
+            )
+        },
+
+        "severity_distribution": {
+            "Simple": classified.get("simple", 0),
+            "Medium": classified.get("medium", 0),
+            "Complex": classified.get("complex", 0)
+        },
+
+        "os_distribution": os_distribution,
+
+        "source_distribution": source_distribution,
+
+        "validation_distribution": {
+            "PASS": validation_pass,
+            "REVIEW": validation_review
+        },
+
+        "execution_distribution": {
+            "Successful": execution_success,
+            "Failed": execution_failed
+        },
+
+        "pipeline_funnel": pipeline_funnel,
+
+        "agent_execution": agent_execution
+    }
+
+    state["reporting_metrics"] = report
+
+    return state
+# ==========================================================
+# 8️⃣ LOGGING + REPORTING
+# ==========================================================
+
+
+# ==========================================================
+# EXCEL METRICS REPORT
+# ==========================================================
+
+def generate_excel_report(state: RemediationState):
+
+    report = state.get(
+        "reporting_metrics",
+        {}
+    )
+
+    if not report:
+        return None
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        # ==================================================
+        # 1. EXECUTIVE KPIs
+        # ==================================================
+
+        kpis = report.get(
+            "kpis",
+            {}
+        )
+
+        kpi_df = pd.DataFrame(
+            {
+                "Metric": [
+                    "Total Vulnerabilities",
+                    "Classified CVEs",
+                    "Remediation Found",
+                    "Remediation Coverage (%)",
+                    "Validation Pass",
+                    "Validation Rate (%)",
+                    "Execution Success",
+                    "Execution Rate (%)",
+                    "RAG Hits",
+                    "RAG Coverage (%)"
+                ],
+
+                "Value": [
+                    kpis.get(
+                        "total_cves",
+                        0
+                    ),
+
+                    kpis.get(
+                        "classified",
+                        0
+                    ),
+
+                    kpis.get(
+                        "remediation_found",
+                        0
+                    ),
+
+                    kpis.get(
+                        "remediation_coverage",
+                        0
+                    ),
+
+                    kpis.get(
+                        "validation_pass",
+                        0
+                    ),
+
+                    kpis.get(
+                        "validation_rate",
+                        0
+                    ),
+
+                    kpis.get(
+                        "execution_success",
+                        0
+                    ),
+
+                    kpis.get(
+                        "execution_rate",
+                        0
+                    ),
+
+                    kpis.get(
+                        "rag_hits",
+                        0
+                    ),
+
+                    kpis.get(
+                        "rag_coverage",
+                        0
+                    )
+                ]
+            }
+        )
+
+        kpi_df.to_excel(
+            writer,
+            sheet_name="Executive KPIs",
+            index=False
+        )
+
+        # ==================================================
+        # 2. SEVERITY DISTRIBUTION
+        # ==================================================
+
+        severity = report.get(
+            "severity_distribution",
+            {}
+        )
+
+        severity_df = pd.DataFrame(
+            {
+                "Severity":
+                    list(
+                        severity.keys()
+                    ),
+
+                "Vulnerabilities":
+                    list(
+                        severity.values()
+                    )
+            }
+        )
+
+        severity_df.to_excel(
+            writer,
+            sheet_name="Severity",
+            index=False
+        )
+
+        # ==================================================
+        # 3. OS DISTRIBUTION
+        # ==================================================
+
+        os_distribution = report.get(
+            "os_distribution",
+            {}
+        )
+
+        os_df = pd.DataFrame(
+            {
+                "Operating System":
+                    list(
+                        os_distribution.keys()
+                    ),
+
+                "Vulnerabilities":
+                    list(
+                        os_distribution.values()
+                    )
+            }
+        )
+
+        os_df.to_excel(
+            writer,
+            sheet_name="OS Distribution",
+            index=False
+        )
+
+        # ==================================================
+        # 4. REMEDIATION SOURCE DISTRIBUTION
+        # ==================================================
+
+        source_distribution = report.get(
+            "source_distribution",
+            {}
+        )
+
+        source_df = pd.DataFrame(
+            {
+                "Remediation Source":
+                    list(
+                        source_distribution.keys()
+                    ),
+
+                "CVEs":
+                    list(
+                        source_distribution.values()
+                    )
+            }
+        )
+
+        source_df.to_excel(
+            writer,
+            sheet_name="Remediation Sources",
+            index=False
+        )
+
+        # ==================================================
+        # 5. VALIDATION OUTCOME
+        # ==================================================
+
+        validation_distribution = report.get(
+            "validation_distribution",
+            {}
+        )
+
+        validation_df = pd.DataFrame(
+            {
+                "Validation Status":
+                    list(
+                        validation_distribution.keys()
+                    ),
+
+                "CVEs":
+                    list(
+                        validation_distribution.values()
+                    )
+            }
+        )
+
+        validation_df.to_excel(
+            writer,
+            sheet_name="Validation",
+            index=False
+        )
+
+        # ==================================================
+        # 6. EXECUTION OUTCOME
+        # ==================================================
+
+        execution_distribution = report.get(
+            "execution_distribution",
+            {}
+        )
+
+        execution_df = pd.DataFrame(
+            {
+                "Execution Status":
+                    list(
+                        execution_distribution.keys()
+                    ),
+
+                "CVEs":
+                    list(
+                        execution_distribution.values()
+                    )
+            }
+        )
+
+        execution_df.to_excel(
+            writer,
+            sheet_name="Execution",
+            index=False
+        )
+
+        # ==================================================
+        # 7. PIPELINE FUNNEL
+        # ==================================================
+
+        pipeline_funnel = report.get(
+            "pipeline_funnel",
+            {}
+        )
+
+        funnel_df = pd.DataFrame(
+            {
+                "Pipeline Stage":
+                    list(
+                        pipeline_funnel.keys()
+                    ),
+
+                "CVEs":
+                    list(
+                        pipeline_funnel.values()
+                    )
+            }
+        )
+
+        funnel_df.to_excel(
+            writer,
+            sheet_name="Pipeline Funnel",
+            index=False
+        )
+
+        # ==================================================
+        # 8. AGENT EXECUTION
+        # ==================================================
+
+        agent_execution = report.get(
+            "agent_execution",
+            {}
+        )
+
+        agent_df = pd.DataFrame(
+            {
+                "Agent":
+                    list(
+                        agent_execution.keys()
+                    ),
+
+                "Executions / Hits":
+                    list(
+                        agent_execution.values()
+                    )
+            }
+        )
+
+        agent_df.to_excel(
+            writer,
+            sheet_name="Agent Execution",
+            index=False
+        )
+
+        # ==================================================
+        # 9. CVE EXECUTION SUMMARY
+        # ==================================================
+
+        execution_result = state.get(
+            "execution_result",
+            {}
+        )
+
+        validation_result = state.get(
+            "validation_result",
+            {}
+        )
+
+        vulnerabilities = state.get(
+            "vulnerabilities",
+            []
+        )
+
+        remediation_data = state.get(
+            "remediation_data",
+            {}
+        )
+
+        rows = []
+
+        for vulnerability in vulnerabilities:
+
+            cve = vulnerability.get(
+                "Name",
+                ""
+            )
+
+            if not cve:
+                continue
+
+            rows.append(
+                {
+                    "CVE": cve,
+
+                    "Operating System":
+                        vulnerability.get(
+                            "OperatingSystem",
+                            ""
+                        ),
+
+                    "Classification":
+                        vulnerability.get(
+                            "classification",
+                            ""
+                        ),
+
+                    "Validation":
+                        validation_result.get(
+                            cve,
+                            "N/A"
+                        ),
+
+                    "Execution":
+                        execution_result.get(
+                            cve,
+                            "N/A"
+                        ),
+
+                    "Remediation Source":
+                        remediation_data.get(
+                            cve,
+                            {}
+                        ).get(
+                            "sources",
+                            "N/A"
+                        )
+                }
+            )
+
+        execution_summary_df = pd.DataFrame(
+            rows
+        )
+
+        execution_summary_df.to_excel(
+            writer,
+            sheet_name="CVE Summary",
+            index=False
+        )
+
+        # ==================================================
+        # FORMAT EXCEL SHEETS
+        # ==================================================
+
+        for worksheet in writer.book.worksheets:
+
+            # Freeze header row
+            worksheet.freeze_panes = "A2"
+
+            # Bold header
+            for cell in worksheet[1]:
+
+                cell.font = cell.font.copy(
+                    bold=True
+                )
+
+            # Auto-size columns
+            for column in worksheet.columns:
+
+                max_length = 0
+
+                column_letter = (
+                    column[0].column_letter
+                )
+
+                for cell in column:
+
+                    try:
+
+                        cell_length = len(
+                            str(cell.value)
+                        )
+
+                        max_length = max(
+                            max_length,
+                            cell_length
+                        )
+
+                    except Exception:
+                        pass
+
+                worksheet.column_dimensions[
+                    column_letter
+                ].width = min(
+                    max_length + 2,
+                    50
+                )
+
+    output.seek(0)
+
+    return output
+
 def logging_agent(state: RemediationState):
 
-    state["logs"].append("Logs & results generated")
+    # Generate dashboard metrics
+    state = generate_reporting_metrics(state)
+
+    state["logs"].append(
+        "Metrics & reporting dashboard generated"
+    )
+
     state["current_step"] = 8
+
     return state
 
 
