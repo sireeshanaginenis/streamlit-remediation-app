@@ -4,6 +4,7 @@ langchain
 langchain-community
 langchain-chroma
 langchain-text-splitters
+langgraph
 sentence-transformers
 chromadb
 python-docx
